@@ -15,6 +15,10 @@ HTTP_OK = 200
 HTTP_BAD_REQUEST = 400
 HTTP_SERVICE_UNAVAILABLE = 503
 
+debug = False
+logging = None
+watcher = None
+
 
 @app.route('/', methods=['POST'])
 def add_appointment():
@@ -80,6 +84,7 @@ def get_appointment():
         for job in responder_jobs.values():
             if job.locator == locator:
                 job_data = job.to_json()
+                job_data['locator'] = locator
                 job_data['status'] = "dispute_responded"
                 response.append(job_data)
 
@@ -105,6 +110,7 @@ def get_all_appointments():
         if watcher.responder:
             for uuid, job in watcher.responder.jobs.items():
                 responder_jobs[uuid] = job.to_json()
+                responder_jobs[uuid]["locator"] = job.locator
 
         response = jsonify({"watcher_appointments": watcher_appointments, "responder_jobs": responder_jobs})
 
