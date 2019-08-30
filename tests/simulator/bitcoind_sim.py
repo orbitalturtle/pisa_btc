@@ -14,6 +14,7 @@ import time
 app = Flask(__name__)
 HOST = 'localhost'
 PORT = '18443'
+BLOCK_TIME = 10
 
 
 @app.route('/', methods=['POST'])
@@ -45,6 +46,8 @@ def process_request():
 
     getblockhash:           a block hash is only queried by pisad on bootstrapping to check the network bitcoind is
                             running on.
+
+    getbestblockhash:       returns the hash of the block in the tip of the chain
 
     help:                   help is only used as a sample command to test if bitcoind is running when bootstrapping
                             pisad. It will return a 200/OK with no data.
@@ -144,6 +147,9 @@ def process_request():
             response["error"] = no_param_err
             response["error"]["message"] = response["error"]["message"].format("integer")
 
+    elif method == "getbestblockhash":
+        response["result"] = blockchain[-1]
+
     elif method == "help":
         pass
 
@@ -193,7 +199,7 @@ def simulate_mining():
         print("New block mined: {}".format(block_hash))
         print("\tTransactions: {}".format(txs_to_mine))
 
-        time.sleep(10)
+        time.sleep(BLOCK_TIME)
 
 
 if __name__ == '__main__':
