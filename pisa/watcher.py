@@ -19,6 +19,46 @@ class Watcher:
         self.zmq_subscriber = None
         self.responder = Responder()
 
+    @classmethod
+    def load_prev_state(cls, appointments, jobs, missed_blocks):
+        # Create a new watcher
+        watcher = cls()
+
+        if jobs:
+            # Bootstrap the responder from a previous state
+            watcher.responder = Responder.load_prev_state(jobs, missed_blocks)
+
+        if appointments:
+            # Restore the appointments dictionary and locator:uuid map
+            for uuid, appointment in appointments:
+                watcher.appointments[uuid] = appointment
+
+                if appointment.locator in watcher.locator_uuid_map:
+                    watcher.locator_uuid_map[appointment.locator].append(uuid)
+
+                else:
+                    watcher.locator_uuid_map[appointment.locator] = [uuid]
+
+            # Fetch all the missed blocks to the block queue
+            watcher.block_queue = Queue()
+
+            for block in missed_blocks:
+                watcher.block_queue.put(block)
+
+        return watcher
+
+    def awake_if_asleep(self, debug, logging, queue=Queue()):
+        if self.asleep:
+            self.asleep = False
+            self.block_queue = queue
+            zmq_thread = Thread(target=self.do_subscribe, args=[self.block_queue, debug, logging])
+            watcher = Thread(target=self.do_watch, args=[debug, logging])
+            zmq_thread.start()
+            watcher.start()
+
+            if debug:
+                logging.info("[Watcher] waking up!")
+
     def add_appointment(self, appointment, debug, logging):
         # Rationale:
         # The Watcher will analyze every received block looking for appointment matches. If there is no work
@@ -33,6 +73,8 @@ class Watcher:
             # collision in our appointments structure (and may be an attack surface). In order to avoid such collisions
             # we will identify every appointment with a uuid
 
+            # TODO: Add a db manager to deal with db writes
+
             uuid = uuid4().hex
             self.appointments[uuid] = appointment
 
@@ -42,16 +84,7 @@ class Watcher:
             else:
                 self.locator_uuid_map[appointment.locator] = [uuid]
 
-            if self.asleep:
-                self.asleep = False
-                self.block_queue = Queue()
-                zmq_thread = Thread(target=self.do_subscribe, args=[self.block_queue, debug, logging])
-                watcher = Thread(target=self.do_watch, args=[debug, logging])
-                zmq_thread.start()
-                watcher.start()
-
-                if debug:
-                    logging.info("[Watcher] waking up!")
+            self.awake_if_asleep(debug, logging)
 
             appointment_added = True
 

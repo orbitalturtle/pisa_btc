@@ -1,5 +1,4 @@
 from pisa import *
-from pisa.watcher import Watcher
 from pisa.inspector import Inspector
 from pisa.appointment import Appointment
 from flask import Flask, request, Response, abort, jsonify
@@ -27,6 +26,8 @@ def add_appointment():
 
     # Check content type once if properly defined
     request_data = json.loads(request.get_json())
+
+    inspector = Inspector(debug, logging)
     appointment = inspector.inspect(request_data)
 
     if type(appointment) == Appointment:
@@ -121,15 +122,13 @@ def get_block_count():
     return jsonify({"block_count": bitcoin_cli.getblockcount()})
 
 
-def start_api(d, l):
+def start_api(w, d, l):
     # FIXME: Pretty ugly but I haven't found a proper way to pass it to add_appointment
-    global debug, logging, watcher, inspector
+    global debug, logging, watcher
+
     debug = d
     logging = l
-
-    # ToDo: #18-separate-api-from-watcher
-    watcher = Watcher()
-    inspector = Inspector(debug, logging)
+    watcher = w
 
     # Setting Flask log t ERROR only so it does not mess with out logging
     logging.getLogger('werkzeug').setLevel(logging.ERROR)

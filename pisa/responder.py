@@ -42,6 +42,41 @@ class Responder:
         self.asleep = True
         self.zmq_subscriber = None
 
+    @classmethod
+    def load_prev_state(cls, jobs, missed_blocks):
+        responder = cls()
+
+        if jobs:
+            # Restore the appointments dictionary and locator:uuid map
+            for uuid, job in jobs:
+                responder.jobs[uuid] = job
+
+                if job.justice_txid in responder.tx_job_map:
+                    responder.tx_job_map[job.justice_txid].append(uuid)
+
+                else:
+                    responder.tx_job_map[job.justice_txid] = [uuid]
+
+            # Fetch all the missed blocks to the block queue
+            responder.block_queue = Queue()
+
+            for block in missed_blocks:
+                responder.block_queue.put(block)
+
+        return responder
+
+    def awake_if_asleep(self, debug, logging, queue=Queue()):
+        if self.asleep:
+            self.asleep = False
+            self.block_queue = queue
+            zmq_thread = Thread(target=self.do_subscribe, args=[self.block_queue, debug, logging])
+            responder = Thread(target=self.handle_responses, args=[debug, logging])
+            zmq_thread.start()
+            responder.start()
+
+            if debug:
+                logging.info("[Responder] waking up!")
+
     def add_response(self, uuid, dispute_txid, justice_txid, justice_rawtx, appointment_end, debug, logging,
                      retry=False):
 
@@ -50,8 +85,6 @@ class Responder:
 
         try:
             if debug:
-                if self.asleep:
-                    logging.info("[Responder] waking up!")
                 logging.info("[Responder] pushing transaction to the network (txid: {})".format(justice_txid))
 
             bitcoin_cli.sendrawtransaction(justice_rawtx)
@@ -85,13 +118,7 @@ class Responder:
             logging.info('[Responder] new job added (dispute txid = {}, justice txid = {}, appointment end = {})'.
                          format(dispute_txid, justice_txid, appointment_end))
 
-        if self.asleep:
-            self.asleep = False
-            self.block_queue = Queue()
-            zmq_thread = Thread(target=self.do_subscribe, args=[self.block_queue, debug, logging])
-            responder = Thread(target=self.handle_responses, args=[debug, logging])
-            zmq_thread.start()
-            responder.start()
+        self.awake_if_asleep(debug, logging)
 
     def do_subscribe(self, block_queue, debug, logging):
         self.zmq_subscriber = ZMQHandler(parent='Responder')
