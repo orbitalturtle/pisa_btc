@@ -2,11 +2,12 @@ from queue import Queue
 from threading import Thread
 from hashlib import sha256
 from binascii import unhexlify
+import json
+import pisa.conf as conf
 from pisa.zmq_subscriber import ZMQHandler
 from pisa.rpc_errors import *
 from pisa.tools import check_tx_in_chain
 from pisa.utils.authproxy import AuthServiceProxy, JSONRPCException
-from pisa.conf import BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT
 
 CONFIRMATIONS_BEFORE_RETRY = 6
 MIN_CONFIRMATIONS = 6
@@ -27,28 +28,37 @@ class Job:
         #        can be directly got from DB
         self.locator = sha256(unhexlify(dispute_txid)).hexdigest()
 
+    @classmethod
+    def from_json(cls, json_job):
+        return cls(json_job.get("dispute_txid"), json_job.get("justice_txid"),
+                   json_job.get("justice_rawtx"), json_job.get("appointment_end"),
+                   json_job.get("confirmations"), json_job.get("retry_counter"))
+
     def to_json(self):
-        job = {"locator": self.locator, "justice_rawtx": self.justice_rawtx, "confirmations": self.confirmations,
-               "appointment_end": self.appointment_end}
+        job = {"dispute_txid": self.dispute_txid, "justice_txid": self.justice_txid,
+               "justice_rawtx": self.justice_rawtx, "appointment_end": self.appointment_end,
+               "confirmations": self.confirmations, "retry_counter": self.retry_counter}
 
         return job
 
 
 class Responder:
-    def __init__(self):
+    def __init__(self, appointment_db):
         self.jobs = dict()
         self.tx_job_map = dict()
         self.block_queue = None
         self.asleep = True
         self.zmq_subscriber = None
+        self.appointment_db = appointment_db
 
     @classmethod
-    def load_prev_state(cls, jobs, missed_blocks):
-        responder = cls()
+    def load_prev_state(cls, jobs, missed_blocks, appointment_db):
+        responder = cls(appointment_db)
 
         if jobs:
             # Restore the appointments dictionary and locator:uuid map
-            for uuid, job in jobs:
+            for uuid, json_job in jobs.items():
+                job = Job.from_json(json_job)
                 responder.jobs[uuid] = job
 
                 if job.justice_txid in responder.tx_job_map:
@@ -65,10 +75,13 @@ class Responder:
 
         return responder
 
-    def awake_if_asleep(self, debug, logging, queue=Queue()):
+    def awake_if_asleep(self, debug, logging):
         if self.asleep:
+            # Define a new queue if there's none defined (queue is predefined if bootstrapping from and old state)
+            if not self.block_queue:
+                self.block_queue = Queue()
+
             self.asleep = False
-            self.block_queue = queue
             zmq_thread = Thread(target=self.do_subscribe, args=[self.block_queue, debug, logging])
             responder = Thread(target=self.handle_responses, args=[debug, logging])
             zmq_thread.start()
@@ -80,8 +93,8 @@ class Responder:
     def add_response(self, uuid, dispute_txid, justice_txid, justice_rawtx, appointment_end, debug, logging,
                      retry=False):
 
-        bitcoin_cli = AuthServiceProxy("http://%s:%s@%s:%d" % (BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST,
-                                                               BTC_RPC_PORT))
+        bitcoin_cli = AuthServiceProxy("http://%s:%s@%s:%d" % (conf.BTC_RPC_USER, conf.BTC_RPC_PASSWD,
+                                                               conf.BTC_RPC_HOST, conf.BTC_RPC_PORT))
 
         try:
             if debug:
@@ -114,9 +127,13 @@ class Responder:
             else:
                 self.tx_job_map[justice_txid] = [uuid]
 
+        self.appointment_db.put(conf.RESPONDER_PREFIX + uuid.encode('utf-8'),
+                                json.dumps(self.jobs[uuid].to_json()).encode('utf-8'))
+
         if debug:
             logging.info('[Responder] new job added (dispute txid = {}, justice txid = {}, appointment end = {})'.
                          format(dispute_txid, justice_txid, appointment_end))
+            logging.info('[Responder] new job recorded in the db {}'.format(uuid))
 
         self.awake_if_asleep(debug, logging)
 
@@ -125,8 +142,8 @@ class Responder:
         self.zmq_subscriber.handle(block_queue, debug, logging)
 
     def handle_responses(self, debug, logging):
-        bitcoin_cli = AuthServiceProxy("http://%s:%s@%s:%d" % (BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST,
-                                                               BTC_RPC_PORT))
+        bitcoin_cli = AuthServiceProxy("http://%s:%s@%s:%d" % (conf.BTC_RPC_USER, conf.BTC_RPC_PASSWD,
+                                                               conf.BTC_RPC_HOST, conf.BTC_RPC_PORT))
         prev_block_hash = 0
         while len(self.jobs) > 0:
             # We get notified for every new received block
@@ -189,6 +206,9 @@ class Responder:
 
                 self.handle_reorgs(bitcoin_cli, debug, logging)
 
+            # Register the last processed block for the responder
+            self.appointment_db.put(conf.RESPONDER_LAST_BLOCK_KEY, block_hash.encode('utf-8'))
+
             prev_block_hash = block.get('hash')
 
         # Go back to sleep if there are no more jobs
@@ -244,8 +264,6 @@ class Responder:
                 logging.info("[Responder] job completed (uuid = {}, justice_txid = {}). Appointment ended at "
                              "block {} after {} confirmations".format(uuid, self.jobs[uuid].justice_txid, height,
                                                                       self.jobs[uuid].confirmations))
-
-            # ToDo: #9-add-data-persistency
             justice_txid = self.jobs[uuid].justice_txid
             self.jobs.pop(uuid)
 
@@ -257,6 +275,12 @@ class Responder:
 
             else:
                 self.tx_job_map[justice_txid].remove(uuid)
+
+                # Delete appointment from the db
+                self.appointment_db.delete(conf.RESPONDER_PREFIX + uuid.encode('utf-8'))
+
+                if debug:
+                    logging.info("[Responder] deleting {} from db".format(uuid))
 
     def handle_reorgs(self, bitcoin_cli, debug, logging):
         for uuid, job in self.jobs.items():

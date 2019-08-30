@@ -1,36 +1,40 @@
 from binascii import hexlify, unhexlify
 from queue import Queue
 from threading import Thread
+import pisa.conf as conf
 from pisa.responder import Responder
 from pisa.zmq_subscriber import ZMQHandler
+from pisa.appointment import Appointment
 from pisa.utils.authproxy import AuthServiceProxy, JSONRPCException
 from hashlib import sha256
 from uuid import uuid4
-from pisa.conf import BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT, MAX_APPOINTMENTS, EXPIRY_DELTA
+import json
 
 
 class Watcher:
-    def __init__(self, max_appointments=MAX_APPOINTMENTS):
+    def __init__(self, appointment_db, max_appointments=conf.MAX_APPOINTMENTS):
         self.appointments = dict()
         self.locator_uuid_map = dict()
         self.block_queue = None
         self.asleep = True
         self.max_appointments = max_appointments
         self.zmq_subscriber = None
-        self.responder = Responder()
+        self.responder = Responder(appointment_db)
+        self.appointment_db = appointment_db
 
     @classmethod
-    def load_prev_state(cls, appointments, jobs, missed_blocks):
+    def load_prev_state(cls, appointments, missed_blocks_watcher, jobs, missed_blocks_responder, appointment_db):
         # Create a new watcher
-        watcher = cls()
+        watcher = cls(appointment_db)
 
         if jobs:
             # Bootstrap the responder from a previous state
-            watcher.responder = Responder.load_prev_state(jobs, missed_blocks)
+            watcher.responder = Responder.load_prev_state(jobs, missed_blocks_responder, appointment_db)
 
         if appointments:
             # Restore the appointments dictionary and locator:uuid map
-            for uuid, appointment in appointments:
+            for uuid, json_appointment in appointments.items():
+                appointment = Appointment.from_json(json_appointment)
                 watcher.appointments[uuid] = appointment
 
                 if appointment.locator in watcher.locator_uuid_map:
@@ -42,15 +46,18 @@ class Watcher:
             # Fetch all the missed blocks to the block queue
             watcher.block_queue = Queue()
 
-            for block in missed_blocks:
+            for block in missed_blocks_watcher:
                 watcher.block_queue.put(block)
 
         return watcher
 
-    def awake_if_asleep(self, debug, logging, queue=Queue()):
+    def awake_if_asleep(self, debug, logging):
         if self.asleep:
+            # Define a new queue if there's none defined (queue is predefined if bootstrapping from and old state)
+            if not self.block_queue:
+                self.block_queue = Queue()
+
             self.asleep = False
-            self.block_queue = queue
             zmq_thread = Thread(target=self.do_subscribe, args=[self.block_queue, debug, logging])
             watcher = Thread(target=self.do_watch, args=[debug, logging])
             zmq_thread.start()
@@ -73,8 +80,6 @@ class Watcher:
             # collision in our appointments structure (and may be an attack surface). In order to avoid such collisions
             # we will identify every appointment with a uuid
 
-            # TODO: Add a db manager to deal with db writes
-
             uuid = uuid4().hex
             self.appointments[uuid] = appointment
 
@@ -86,10 +91,14 @@ class Watcher:
 
             self.awake_if_asleep(debug, logging)
 
-            appointment_added = True
+            self.appointment_db.put(conf.WATCHER_PREFIX+uuid.encode('utf-8'),
+                                    json.dumps(appointment.to_json()).encode('utf-8'))
 
             if debug:
                 logging.info('[Watcher] new appointment accepted (locator = {})'.format(appointment.locator))
+                logging.info('[Watcher] new appointment recorded in the db {}'.format(uuid))
+
+            appointment_added = True
 
         else:
             appointment_added = False
@@ -105,8 +114,8 @@ class Watcher:
         self.zmq_subscriber.handle(block_queue, debug, logging)
 
     def do_watch(self, debug, logging):
-        bitcoin_cli = AuthServiceProxy("http://%s:%s@%s:%d" % (BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST,
-                                                               BTC_RPC_PORT))
+        bitcoin_cli = AuthServiceProxy("http://%s:%s@%s:%d" % (conf.BTC_RPC_USER, conf.BTC_RPC_PASSWD,
+                                                               conf.BTC_RPC_HOST, conf.BTC_RPC_PORT))
 
         while len(self.appointments) > 0:
             block_hash = self.block_queue.get()
@@ -149,12 +158,19 @@ class Watcher:
 
                     # If there was only one appointment that matches the locator we can delete the whole list
                     if len(self.locator_uuid_map[locator]) == 1:
-                        # ToDo: #9-add-data-persistency
                         self.locator_uuid_map.pop(locator)
                     else:
                         # Otherwise we just delete the appointment that matches locator:appointment_pos
-                        # ToDo: #9-add-data-persistency
                         self.locator_uuid_map[locator].remove(uuid)
+
+                    # Delete appointment from the db
+                    self.appointment_db.delete(conf.WATCHER_PREFIX + uuid.encode('utf-8'))
+
+                    if debug:
+                        logging.info("[Watcher] deleting {} from db".format(uuid))
+
+                # Register the last processed block for the watcher
+                self.appointment_db.put(conf.WATCHER_LAST_BLOCK_KEY, block_hash.encode('utf-8'))
 
             except JSONRPCException as e:
                 if debug:
@@ -169,10 +185,9 @@ class Watcher:
 
     def delete_expired_appointment(self, block, debug, logging):
         to_delete = [uuid for uuid, appointment in self.appointments.items() if block["height"] > appointment.end_time
-                     + EXPIRY_DELTA]
+                     + conf.EXPIRY_DELTA]
 
         for uuid in to_delete:
-            # ToDo: #9-add-data-persistency
             locator = self.appointments[uuid].locator
 
             self.appointments.pop(uuid)
@@ -186,6 +201,12 @@ class Watcher:
             if debug:
                 logging.info("[Watcher] end time reached with no match! Deleting appointment {} (uuid: {})"
                              .format(locator, uuid))
+
+            # Delete appointment from the db
+            self.appointment_db.delete(conf.WATCHER_PREFIX + uuid)
+
+            if debug:
+                logging.info("[Watcher] deleting {} from db".format(uuid))
 
     def check_potential_matches(self, potential_matches, bitcoin_cli, debug, logging):
         matches = []
