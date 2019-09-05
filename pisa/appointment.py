@@ -11,6 +11,7 @@ class Appointment:
         self.encrypted_blob = EncryptedBlob(encrypted_blob)
         self.cipher = cipher
         self.hash_function = hash_function
+        self.triggered = False
 
     @classmethod
     def from_json(cls, json_appointment):

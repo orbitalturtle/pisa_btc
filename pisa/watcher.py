@@ -154,7 +154,8 @@ class Watcher:
                                                 self.appointments[uuid].end_time, debug, logging)
 
                     # Delete the appointment
-                    self.appointments.pop(uuid)
+                    appointment = self.appointments.pop(uuid)
+                    appointment["triggered"] = True
 
                     # If there was only one appointment that matches the locator we can delete the whole list
                     if len(self.locator_uuid_map[locator]) == 1:
@@ -163,11 +164,19 @@ class Watcher:
                         # Otherwise we just delete the appointment that matches locator:appointment_pos
                         self.locator_uuid_map[locator].remove(uuid)
 
-                    # Delete appointment from the db
-                    self.appointment_db.delete(conf.WATCHER_PREFIX + uuid.encode('utf-8'))
-
+                    # DISCUSS: instead of deleting the appointment, we will mark it as triggered and delete it from both
+                    #          the watcher's and responder's db after fulfilled
+                    # Update appointment in the db
+                    self.appointment_db.put(conf.WATCHER_PREFIX+uuid.encode('utf-8'),
+                                            json.dumps(appointment.to_json()).encode('utf-8'))
                     if debug:
-                        logging.info("[Watcher] deleting {} from db".format(uuid))
+                        logging.info("[Watcher] updating {} in watcher's db".format(uuid))
+
+                    # # Delete appointment from the db
+                    # self.appointment_db.delete(conf.WATCHER_PREFIX + uuid.encode('utf-8'))
+                    #
+                    # if debug:
+                    #     logging.info("[Watcher] deleting {} from db".format(uuid))
 
                 # Register the last processed block for the watcher
                 self.appointment_db.put(conf.WATCHER_LAST_BLOCK_KEY, block_hash.encode('utf-8'))

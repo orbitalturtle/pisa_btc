@@ -60,25 +60,29 @@ def in_correct_network(bitcoin_cli, network):
 
 def find_last_common_block(bitcoin_cli, last_known_blocks, debug, logging):
     last_common_block = None
+    height = None
 
-    for block_hash in last_known_blocks:
+    while not last_common_block:
+        block_hash = last_known_blocks.pop()
+
         try:
             bitcoin_cli.getblock(block_hash)
             last_common_block = block_hash
+            height = last_common_block.get("height")
 
         except JSONRPCException as e:
             if e.error.get('code') == RPC_INVALID_ADDRESS_OR_KEY:
                 if debug:
-                    if block_hash == last_known_blocks[-1]:
+                    if len(last_known_blocks) == 0:
                         logging.info('[Pisad] cannot bootstrap from backed up data, no common block found')
 
                     else:
                         logging.info('[Pisad] block {} not found. Backtracking...')
 
-    return last_common_block
+    return last_common_block, height
 
 
-def rewind_states(bitcoin_cli, watcher_appointments, responder_jobs):
+def rewind_responder_state(bitcoin_cli, watcher_appointments, responder_jobs, last_common_block_height):
     # There's nothing to be done in terms of updating nor moving appointments from the watcher to the responder.
     # Once the watcher is bootstrapped with the missed blocks and the old state it will be able to handle the changes.
     # However, some jobs may need to go back to the watcher in case of a reorg taking them out of the chain.
@@ -86,16 +90,29 @@ def rewind_states(bitcoin_cli, watcher_appointments, responder_jobs):
     for uuid, job in responder_jobs:
         try:
             tx_info = bitcoin_cli.getrawtransaction(job.justice_txid, 1)
-            job.confirmations = int(tx_info.get("confirmations"))
+            # DISCUSS: the block can get reorged between this two calls. Should get care about this?
+            block = bitcoin_cli.getrawtransaction(tx_info.get("blockhash"))
+
+            job.confirmations = last_common_block_height - block.get("height")
+
+            # Sanity check
+            assert job.confirmations >= 0
 
         except JSONRPCException as e:
             if e.error.get('code') == RPC_INVALID_ADDRESS_OR_KEY:
-                # FIXME: could this overwrite some watcher's data?
-                # FIXME: we are missing most of the data since jobs were not supposed to go back
-                watcher_appointments[uuid] = Appointment(job.locator, None, job.appointment_end, None, None, None, None)
+                appointment = watcher_appointments[uuid]
+
+                # Sanity check
+                assert appointment.get("triggered") is True
+
+                appointment["triggered"] = False
+                watcher_appointments[uuid] = Appointment.from_json(appointment)
                 responder_jobs.pop(uuid)
 
-    return watcher_appointments, responder_jobs
+    # Take out triggered appointments
+    watcher_appointments = {k: v for k, v in watcher_appointments.items() if v.get("triggered") is False}
+
+    return responder_jobs
 
 
 def get_missed_blocks(bitcoin_cli, last_common_block):

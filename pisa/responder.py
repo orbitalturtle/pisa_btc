@@ -166,6 +166,8 @@ class Responder:
                 continue
 
             completed_jobs = []
+            # FIXME: Since we can bootstrap from old data now, we should provide the prev_block_hash to the responder
+            #        in case we miss a block while reconstructing the old state
             if prev_block_hash == block.get('previousblockhash') or prev_block_hash == 0:
                 # Keep count of the confirmations each tx gets
                 for justice_txid, jobs in self.tx_job_map.items():
@@ -276,7 +278,8 @@ class Responder:
             else:
                 self.tx_job_map[justice_txid].remove(uuid)
 
-                # Delete appointment from the db
+                # Delete appointment from the db (both watchers's and responder's)
+                self.appointment_db.delete(conf.WATCHER_PREFIX + uuid.encode('utf-8'))
                 self.appointment_db.delete(conf.RESPONDER_PREFIX + uuid.encode('utf-8'))
 
                 if debug:

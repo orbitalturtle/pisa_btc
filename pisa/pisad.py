@@ -4,23 +4,10 @@ from getopt import getopt
 import pisa.conf as conf
 from pisa.api import start_api
 from pisa.watcher import Watcher
-from pisa.tools import can_connect_to_bitcoind, in_correct_network
+from pisa.tools import can_connect_to_bitcoind, in_correct_network, get_missed_blocks, find_last_common_block, \
+    rewind_responder_state
 from pisa.utils.authproxy import AuthServiceProxy
 from pisa.db_manager import open_db, load_appointments_db, get_last_known_block
-
-
-def get_missed_blocks(last_known_block_hash, bitcoin_cli):
-    current_block_hash = bitcoin_cli.getbestblockhash()
-
-    missed_blocks = []
-
-    while current_block_hash != last_known_block_hash and current_block_hash is not None:
-        missed_blocks.append(current_block_hash)
-
-        current_block = bitcoin_cli.getblock(current_block_hash)
-        current_block_hash = current_block.get("previousblockhash")
-
-    return missed_blocks[::-1]
 
 
 def main():
@@ -51,15 +38,18 @@ def main():
                     logging.info("[Pisad] bootstrapping from backed up data")
 
                 # Check what we've missed while offline
-                last_known_block_hash_watcher = get_last_known_block(appointment_db, conf.WATCHER_LAST_BLOCK_KEY)
-                last_known_block_hash_responder = get_last_known_block(appointment_db, conf.RESPONDER_LAST_BLOCK_KEY)
+                lkb_watcher = get_last_known_block(appointment_db, conf.WATCHER_LAST_BLOCK_KEY)
+                lkb_responder = get_last_known_block(appointment_db, conf.RESPONDER_LAST_BLOCK_KEY)
 
-                missed_blocks_watcher = get_missed_blocks(last_known_block_hash_watcher, bitcoin_cli)
+                lcb_watcher, _ = find_last_common_block(bitcoin_cli, lkb_watcher, debug, logging)
+                lcb_responder, lcb_height_responder = find_last_common_block(bitcoin_cli, lkb_responder, debug, logging)
 
-                if last_known_block_hash_watcher == last_known_block_hash_responder:
+                missed_blocks_watcher = get_missed_blocks(bitcoin_cli, lcb_watcher)
+
+                if lcb_watcher == lcb_responder:
                     missed_blocks_responder = missed_blocks_watcher
                 else:
-                    missed_blocks_responder = get_missed_blocks(last_known_block_hash_responder, bitcoin_cli)
+                    missed_blocks_responder = get_missed_blocks(bitcoin_cli, lcb_responder)
 
                 if debug:
                     if missed_blocks_watcher:
@@ -70,12 +60,19 @@ def main():
                         logging.info("[Pisad] Responder missed {} blocks".format(len(missed_blocks_responder)))
                         logging.info("[Pisad] {}".format(missed_blocks_responder))
 
+                if lcb_responder != lkb_responder:
+                    responder_jobs = rewind_responder_state(bitcoin_cli, watcher_appointments, responder_jobs,
+                                                            lcb_height_responder)
+
+                # Only watcher's appointments that has not been triggered should be feed to the watcher
+                watcher_appointments = {k: v for k, v in watcher_appointments.items() if
+                                        v.get("triggered") is False}
+
                 # Create a watcher and responder from the previous states
                 watcher = Watcher.load_prev_state(watcher_appointments, missed_blocks_watcher, responder_jobs,
                                                   missed_blocks_responder, appointment_db)
 
-                # TODO: Check how treads should be run here
-                # And fire them if needed
+                # And fire them
                 if responder_jobs:
                     watcher.responder.awake_if_asleep(debug, logging)
 
