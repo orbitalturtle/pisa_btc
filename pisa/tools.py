@@ -90,27 +90,32 @@ def rewind_responder_state(bitcoin_cli, watcher_appointments, responder_jobs, la
     for uuid, job in responder_jobs:
         try:
             tx_info = bitcoin_cli.getrawtransaction(job.justice_txid, 1)
-            # DISCUSS: the block can get reorged between this two calls. Should get care about this?
-            block = bitcoin_cli.getrawtransaction(tx_info.get("blockhash"))
+            block_hash = tx_info.get("blockhash")
 
-            job.confirmations = last_common_block_height - block.get("height")
+            if block_hash:
+                job.confirmations = last_common_block_height - bitcoin_cli.getblock(block_hash).get("height")
 
-            # Sanity check
-            assert job.confirmations >= 0
+                # Sanity check
+                assert job.confirmations >= 0
+
+            else:
+                job.confirmations = 0
 
         except JSONRPCException as e:
             if e.error.get('code') == RPC_INVALID_ADDRESS_OR_KEY:
-                appointment = watcher_appointments[uuid]
+                if 'Block not found' in e.error.get('message'):
+                    # In case the block get reorged between getrawtx and getblock
+                    job.confirmations = 0
 
-                # Sanity check
-                assert appointment.get("triggered") is True
+                else:
+                    appointment = watcher_appointments[uuid]
 
-                appointment["triggered"] = False
-                watcher_appointments[uuid] = Appointment.from_json(appointment)
-                responder_jobs.pop(uuid)
+                    # Sanity check
+                    assert appointment.get("triggered") is True
 
-    # Take out triggered appointments
-    watcher_appointments = {k: v for k, v in watcher_appointments.items() if v.get("triggered") is False}
+                    appointment["triggered"] = False
+                    watcher_appointments[uuid] = Appointment.from_json(appointment)
+                    responder_jobs.pop(uuid)
 
     return responder_jobs
 
