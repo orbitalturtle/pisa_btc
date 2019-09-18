@@ -10,11 +10,50 @@ import json
 import os
 import time
 
-
 app = Flask(__name__)
 HOST = 'localhost'
 PORT = '18443'
 BLOCK_TIME = 10
+GENESIS_PARENT = '0000000000000000000000000000000000000000000000000000000000000000'
+
+
+@app.route('/fork', methods=['POST'])
+def create_fork():
+    """
+    create_fork processes chain fork requests. It will create a fork with the following parameters:
+
+    parent: the block hash from where the chain will be forked
+    length: the length of the fork to be created (number of blocks to be mined on top of parent)
+    stay: whether to stay in the forked chain after length blocks has been mined or to come back to the previous chain.
+          Stay is optional and will default to False.
+    """
+
+    global fork, forking
+
+    request_data = request.get_json()
+    response = {"result": 0, "error": None}
+
+    parent = request_data.get("parent")
+    length = request_data.get("length")
+
+    # Set stay if stay is properly defined
+    stay = request_data.get("stay")
+    stay = True if stay is "True" else False
+
+    # FIXME: We only accept forks one by one for now
+    if forking:
+        response["error"] = {"code": -1, "message": "Already forking"}
+
+    if parent not in blocks:
+        response["error"] = {"code": -1, "message": "Wrong parent block to fork from"}
+
+    elif not isinstance(length, int) or length < 1:
+        response["error"] = {"code": -1, "message": "Wrong fork length. Forks must be at least 1 block long"}
+
+    else:
+        fork = (parent, length, stay)
+
+    return Response(json.dumps(response), status=200, mimetype='application/json')
 
 
 @app.route('/', methods=['POST'])
@@ -125,6 +164,11 @@ def process_request():
 
             if block:
                 block["hash"] = blockid
+
+                # FIXME: the confirmation counter depends on the chain the transaction is in (in case of forks). For
+                #        now there will be only one, but multiple forks would come up handy to test edge cases
+                block["confirmations"] = len(blockchain) - block["height"] + 1
+
                 response["result"] = block
 
             else:
@@ -175,9 +219,23 @@ def load_data():
 
 def simulate_mining():
     global mempool, mined_transactions, blocks, blockchain
-    prev_block_hash = None
+    global fork, forking
+
+    # Create a random genesis
+    prev_block_hash = GENESIS_PARENT
 
     while True:
+        if fork and not forking:
+            parent, length, stay = fork
+
+            print("Forking chain for {} blocks".format(length))
+
+            return_block = prev_block_hash
+            prev_block_hash = parent
+
+            forking = True
+            fork = None
+
         block_hash = binascii.hexlify(os.urandom(32)).decode('utf-8')
         coinbase_tx_hash = binascii.hexlify(os.urandom(32)).decode('utf-8')
         txs_to_mine = [coinbase_tx_hash]
@@ -191,13 +249,29 @@ def simulate_mining():
         for tx in txs_to_mine:
             mined_transactions[tx] = block_hash
 
-        blocks[block_hash] = {"tx": txs_to_mine, "height": len(blockchain), "previousblockhash": prev_block_hash}
+        # FIXME: chain_work is being defined as a incremental counter for now. Multiple chains should be possible.
+        blocks[block_hash] = {"tx": txs_to_mine, "height": len(blockchain), "previousblockhash": prev_block_hash,
+                              "chainwork": len(blockchain)}
         mining_simulator.publish_data(binascii.unhexlify(block_hash))
         blockchain.append(block_hash)
         prev_block_hash = block_hash
 
         print("New block mined: {}".format(block_hash))
-        print("\tTransactions: {}".format(txs_to_mine))
+        print("Transactions: {}".format(txs_to_mine))
+
+        # FIXME: the blockchain is defined as a list (since forks in the sim where not possible til recently). Therefore
+        #        block heights and blockchain length is currently incorrect. It does the trick to test forks, but should
+        #        be fixed for better testing.
+        if forking:
+            if length > 0:
+                length -= 1
+
+            else:
+                forking = False
+
+                if not stay:
+                    print("Going back to previous chain")
+                    prev_block_hash = return_block
 
         time.sleep(BLOCK_TIME)
 
@@ -210,6 +284,9 @@ if __name__ == '__main__':
     mined_transactions = {}
     blocks = {}
     blockchain = []
+
+    fork = None
+    forking = False
 
     mining_thread = Thread(target=simulate_mining)
     mining_thread.start()
