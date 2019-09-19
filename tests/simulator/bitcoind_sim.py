@@ -28,30 +28,25 @@ def create_fork():
           Stay is optional and will default to False.
     """
 
-    global fork, forking
+    global prev_block_hash
 
     request_data = request.get_json()
     response = {"result": 0, "error": None}
 
     parent = request_data.get("parent")
-    length = request_data.get("length")
-
-    # Set stay if stay is properly defined
-    stay = request_data.get("stay")
-    stay = True if stay is "True" else False
 
     # FIXME: We only accept forks one by one for now
-    if forking:
-        response["error"] = {"code": -1, "message": "Already forking"}
 
     if parent not in blocks:
         response["error"] = {"code": -1, "message": "Wrong parent block to fork from"}
 
-    elif not isinstance(length, int) or length < 1:
-        response["error"] = {"code": -1, "message": "Wrong fork length. Forks must be at least 1 block long"}
-
     else:
-        fork = (parent, length, stay)
+        prev_block_hash = parent
+        print("Forking chain from {}".format(parent))
+
+        # FIXME: the blockchain is defined as a list (since forks in the sim where not possible til recently). Therefore
+        #        block heights and blockchain length is currently incorrect. It does the trick to test forks, but should
+        #        be fixed for better testing.
 
     return Response(json.dumps(response), status=200, mimetype='application/json')
 
@@ -218,24 +213,9 @@ def load_data():
 
 
 def simulate_mining():
-    global mempool, mined_transactions, blocks, blockchain
-    global fork, forking
-
-    # Create a random genesis
-    prev_block_hash = GENESIS_PARENT
+    global mempool, mined_transactions, blocks, blockchain, prev_block_hash
 
     while True:
-        if fork and not forking:
-            parent, length, stay = fork
-
-            print("Forking chain for {} blocks".format(length))
-
-            return_block = prev_block_hash
-            prev_block_hash = parent
-
-            forking = True
-            fork = None
-
         block_hash = binascii.hexlify(os.urandom(32)).decode('utf-8')
         coinbase_tx_hash = binascii.hexlify(os.urandom(32)).decode('utf-8')
         txs_to_mine = [coinbase_tx_hash]
@@ -259,20 +239,6 @@ def simulate_mining():
         print("New block mined: {}".format(block_hash))
         print("Transactions: {}".format(txs_to_mine))
 
-        # FIXME: the blockchain is defined as a list (since forks in the sim where not possible til recently). Therefore
-        #        block heights and blockchain length is currently incorrect. It does the trick to test forks, but should
-        #        be fixed for better testing.
-        if forking:
-            if length > 0:
-                length -= 1
-
-            else:
-                forking = False
-
-                if not stay:
-                    print("Going back to previous chain")
-                    prev_block_hash = return_block
-
         time.sleep(BLOCK_TIME)
 
 
@@ -281,12 +247,10 @@ if __name__ == '__main__':
                                     feed_port=FEED_PORT)
 
     mempool = []
+    blockchain = []
     mined_transactions = {}
     blocks = {}
-    blockchain = []
-
-    fork = None
-    forking = False
+    prev_block_hash = GENESIS_PARENT
 
     mining_thread = Thread(target=simulate_mining)
     mining_thread.start()
