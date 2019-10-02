@@ -231,7 +231,7 @@ def simulate_mining():
 
         # FIXME: chain_work is being defined as a incremental counter for now. Multiple chains should be possible.
         blocks[block_hash] = {"tx": txs_to_mine, "height": len(blockchain), "previousblockhash": prev_block_hash,
-                              "chainwork": len(blockchain)}
+                              "chainwork": '{:x}'.format(len(blockchain))}
         mining_simulator.publish_data(binascii.unhexlify(block_hash))
         blockchain.append(block_hash)
         prev_block_hash = block_hash
