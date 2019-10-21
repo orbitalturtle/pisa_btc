@@ -22,7 +22,12 @@ from test.simulator.utils import sha256d
 from test.simulator.transaction import TX
 from test.unit.conftest import generate_block
 from pisa.utils.auth_proxy import AuthServiceProxy
-from pisa.conf import EXPIRY_DELTA, BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT, PISA_SECRET_KEY
+from pisa.tools import get_bitcoin_cli
+
+# TODO: should use mocked settings and objects instead of importing from pisa.conf
+from pisa.conf import BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT
+from pisa.conf import MAX_APPOINTMENTS, EXPIRY_DELTA, PISA_SECRET_KEY
+from pisa.conf import FEED_PROTOCOL, FEED_ADDR, FEED_PORT
 
 logging.getLogger().disabled = True
 
@@ -39,7 +44,20 @@ with open(PISA_SECRET_KEY, "r") as key_file:
 
 @pytest.fixture(scope="module")
 def watcher():
-    return Watcher()
+    bitcoin_cli = get_bitcoin_cli(BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT)
+    block_processor = BlockProcessor(bitcoin_cli)
+    responder = Responder(block_processor=block_processor, bitcoin_cli=bitcoin_cli)
+
+    return Watcher(
+        block_processor=block_processor,
+        responder=responder,
+        expiry_delta=EXPIRY_DELTA,
+        max_appointments=MAX_APPOINTMENTS,
+        signing_key_file=SIGNING_KEY_FILE,
+        feed_protocol=FEED_PROTOCOL,
+        feed_addr=FEED_ADDR,
+        feed_port=FEED_PORT
+    )
 
 
 def generate_dummy_appointment():

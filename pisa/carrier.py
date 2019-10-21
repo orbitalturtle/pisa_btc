@@ -1,6 +1,5 @@
 from pisa.rpc_errors import *
 from pisa.logger import Logger
-from pisa.tools import bitcoin_cli
 from pisa.utils.auth_proxy import JSONRPCException
 from pisa.errors import UNKNOWN_JSON_RPC_EXCEPTION
 
@@ -17,10 +16,13 @@ class Receipt:
 
 
 class Carrier:
+    def __init__(self, bitcoin_cli):
+        self.bitcoin_cli = bitcoin_cli
+
     def send_transaction(self, rawtx, txid):
         try:
             logger.info("Pushing transaction to the network", txid=txid, rawtx=rawtx)
-            bitcoin_cli().sendrawtransaction(rawtx)
+            self.bitcoin_cli.sendrawtransaction(rawtx)
 
             receipt = Receipt(delivered=True)
 
@@ -67,10 +69,9 @@ class Carrier:
 
         return receipt
 
-    @staticmethod
-    def get_transaction(txid):
+    def get_transaction(self, txid):
         try:
-            tx_info = bitcoin_cli().getrawtransaction(txid, 1)
+            tx_info = self.bitcoin_cli.getrawtransaction(txid, 1)
 
         except JSONRPCException as e:
             tx_info = None

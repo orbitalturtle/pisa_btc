@@ -8,7 +8,6 @@ from pisa.logger import Logger
 from pisa.cleaner import Cleaner
 from pisa.carrier import Carrier
 from pisa.tools import check_tx_in_chain
-from pisa.block_processor import BlockProcessor
 from pisa.utils.zmq_subscriber import ZMQHandler
 
 CONFIRMATIONS_BEFORE_RETRY = 6
@@ -40,7 +39,8 @@ class Job:
 
 
 class Responder:
-    def __init__(self):
+    def __init__(self, block_processor, bitcoin_cli, feed_protocol, feed_addr, feed_port):
+
         self.jobs = dict()
         self.tx_job_map = dict()
         self.unconfirmed_txs = []
@@ -48,13 +48,18 @@ class Responder:
         self.block_queue = None
         self.asleep = True
         self.zmq_subscriber = None
+        self.bitcoin_cli = bitcoin_cli
+        self.feed_protocol = feed_protocol
+        self.feed_addr = feed_addr
+        self.feed_port = feed_port
+
+        self.carrier = Carrier(bitcoin_cli)
 
     def add_response(self, uuid, dispute_txid, justice_txid, justice_rawtx, appointment_end, retry=False):
         if self.asleep:
             logger.info("Waking up")
 
-        carrier = Carrier()
-        receipt = carrier.send_transaction(justice_rawtx, justice_txid)
+        receipt = self.carrier.send_transaction(justice_rawtx, justice_txid)
 
         if receipt.delivered:
             # do_watch can call add_response recursively if a broadcast transaction does not get confirmations
@@ -99,9 +104,11 @@ class Responder:
             zmq_thread.start()
             responder.start()
 
-    def do_subscribe(self):
-        self.zmq_subscriber = ZMQHandler(parent='Responder')
-        self.zmq_subscriber.handle(self.block_queue)
+    def do_subscribe(self, block_queue):
+        self.zmq_subscriber = ZMQHandler(parent='Responder',
+                                         feed_protocol=self.feed_protocol, feed_addr=self.feed_addr,
+                                         feed_port=self.feed_port)
+        self.zmq_subscriber.handle(block_queue)
 
     def do_watch(self):
         # ToDo: #9-add-data-persistence
@@ -111,7 +118,7 @@ class Responder:
         while len(self.jobs) > 0:
             # We get notified for every new received block
             block_hash = self.block_queue.get()
-            block = BlockProcessor.get_block(block_hash)
+            block = self.block_processor.get_block(block_hash)
 
             if block is not None:
                 txs = block.get('tx')
@@ -123,7 +130,7 @@ class Responder:
                 # ToDo: #9-add-data-persistence
                 #       change prev_block_hash condition
                 if prev_block_hash == block.get('previousblockhash') or prev_block_hash == 0:
-                    self.unconfirmed_txs, self.missed_confirmations = BlockProcessor.check_confirmations(
+                    self.unconfirmed_txs, self.missed_confirmations = self.block_processor.check_confirmations(
                         txs, self.unconfirmed_txs, self.tx_job_map, self.missed_confirmations)
 
                     txs_to_rebroadcast = self.get_txs_to_rebroadcast(txs)
@@ -161,7 +168,7 @@ class Responder:
 
         for uuid, job in self.jobs.items():
             if job.appointment_end <= height:
-                tx = Carrier.get_transaction(job.justice_txid)
+                tx = self.carrier.get_transaction(job.justice_txid)
 
                 # FIXME: Should be improved with the librarian
                 confirmations = tx.get('confirmations')
@@ -189,12 +196,13 @@ class Responder:
         for uuid, job in self.jobs.items():
             # First we check if the dispute transaction is still in the blockchain. If not, the justice can not be
             # there either, so we'll need to call the reorg manager straight away
-            dispute_in_chain, _ = check_tx_in_chain(job.dispute_txid, logger=logger, tx_label='Dispute tx')
+            dispute_in_chain, _ = check_tx_in_chain(self.bitcoin_cli,
+                                                    job.dispute_txid, logger=logger, tx_label='Dispute tx')
 
             # If the dispute is there, we can check the justice tx
             if dispute_in_chain:
-                justice_in_chain, justice_confirmations = check_tx_in_chain(job.justice_txid, logger=logger,
-                                                                            tx_label='Justice tx')
+                justice_in_chain, justice_confirmations = check_tx_in_chain(self.bitcoin_cli, job.justice_txid,
+                                                                            logger=logger, tx_label='Justice tx')
 
                 # If both transactions are there, we only need to update the justice tx confirmation count
                 if justice_in_chain:

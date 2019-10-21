@@ -1,8 +1,14 @@
 from pisa import logging
-from pisa.tools import check_txid_format
+from pisa.tools import bitcoin_cli, check_txid_format
 from pisa.tools import can_connect_to_bitcoind, in_correct_network
 
 logging.getLogger().disabled = True
+
+# mock configuration settings
+BTC_RPC_USER = "user"
+BTC_RPC_PASSWD = "passwd"
+BTC_RPC_HOST = "localhost"
+BTC_RPC_PORT = 18443
 
 
 def test_in_correct_network(run_bitcoind):
@@ -13,7 +19,7 @@ def test_in_correct_network(run_bitcoind):
 
 
 def test_can_connect_to_bitcoind():
-    assert can_connect_to_bitcoind() is True
+    assert can_connect_to_bitcoind(BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT) is True
 
 
 # def test_can_connect_to_bitcoind_bitcoin_not_running():

@@ -1,10 +1,8 @@
 import re
 
 from pisa import errors
-import pisa.conf as conf
 from pisa.logger import Logger
 from pisa.appointment import Appointment
-from pisa.block_processor import BlockProcessor
 
 logger = Logger("Inspector")
 
@@ -15,6 +13,12 @@ logger = Logger("Inspector")
 
 
 class Inspector:
+    def __init__(self, block_processor, min_dispute_delta, supported_ciphers, supported_hash_functions):
+        self.block_processor = block_processor
+        self.min_dispute_delta = min_dispute_delta
+        self.supported_ciphers = supported_ciphers
+        self.supported_hash_functions = supported_hash_functions
+
     def inspect(self, data):
         locator = data.get('locator')
         start_time = data.get('start_time')
@@ -24,7 +28,7 @@ class Inspector:
         cipher = data.get('cipher')
         hash_function = data.get('hash_function')
 
-        block_height = BlockProcessor.get_block_count()
+        block_height = self.block_processor.get_block_count()
 
         if block_height is not None:
             rcode, message = self.check_locator(locator)
@@ -53,8 +57,7 @@ class Inspector:
 
         return r
 
-    @staticmethod
-    def check_locator(locator):
+    def check_locator(self, locator):
         message = None
         rcode = 0
 
@@ -77,8 +80,7 @@ class Inspector:
 
         return rcode, message
 
-    @staticmethod
-    def check_start_time(start_time, block_height):
+    def check_start_time(self, start_time, block_height):
         message = None
         rcode = 0
 
@@ -105,8 +107,7 @@ class Inspector:
 
         return rcode, message
 
-    @staticmethod
-    def check_end_time(end_time, start_time, block_height):
+    def check_end_time(self, end_time, start_time, block_height):
         message = None
         rcode = 0
 
@@ -139,8 +140,7 @@ class Inspector:
 
         return rcode, message
 
-    @staticmethod
-    def check_delta(dispute_delta):
+    def check_delta(self, dispute_delta):
         message = None
         rcode = 0
 
@@ -152,10 +152,10 @@ class Inspector:
         elif t != int:
             rcode = errors.APPOINTMENT_WRONG_FIELD_TYPE
             message = "wrong dispute_delta data type ({})".format(t)
-        elif dispute_delta < conf.MIN_DISPUTE_DELTA:
+        elif dispute_delta < self.min_dispute_delta:
             rcode = errors.APPOINTMENT_FIELD_TOO_SMALL
             message = "dispute delta too small. The dispute delta should be at least {} (current: {})".format(
-                conf.MIN_DISPUTE_DELTA, dispute_delta)
+                self.min_dispute_delta, dispute_delta)
 
         if message is not None:
             logger.error(message)
@@ -163,8 +163,7 @@ class Inspector:
         return rcode, message
 
     # ToDo: #6-define-checks-encrypted-blob
-    @staticmethod
-    def check_blob(encrypted_blob):
+    def check_blob(self, encrypted_blob):
         message = None
         rcode = 0
 
@@ -185,8 +184,7 @@ class Inspector:
 
         return rcode, message
 
-    @staticmethod
-    def check_cipher(cipher):
+    def check_cipher(self, cipher):
         message = None
         rcode = 0
 
@@ -198,7 +196,7 @@ class Inspector:
         elif t != str:
             rcode = errors.APPOINTMENT_WRONG_FIELD_TYPE
             message = "wrong cipher data type ({})".format(t)
-        elif cipher.upper() not in conf.SUPPORTED_CIPHERS:
+        elif cipher.upper() not in self.supported_ciphers:
             rcode = errors.APPOINTMENT_CIPHER_NOT_SUPPORTED
             message = "cipher not supported: {}".format(cipher)
 
@@ -207,8 +205,7 @@ class Inspector:
 
         return rcode, message
 
-    @staticmethod
-    def check_hash_function(hash_function):
+    def check_hash_function(self, hash_function):
         message = None
         rcode = 0
 
@@ -220,7 +217,7 @@ class Inspector:
         elif t != str:
             rcode = errors.APPOINTMENT_WRONG_FIELD_TYPE
             message = "wrong hash_function data type ({})".format(t)
-        elif hash_function.upper() not in conf.SUPPORTED_HASH_FUNCTIONS:
+        elif hash_function.upper() not in self.supported_hash_functions:
             rcode = errors.APPOINTMENT_HASH_FUNCTION_NOT_SUPPORTED
             message = "hash_function not supported {}".format(hash_function)
 

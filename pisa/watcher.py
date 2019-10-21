@@ -9,30 +9,34 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 from pisa.logger import Logger
 from pisa.cleaner import Cleaner
-from pisa.conf import EXPIRY_DELTA, MAX_APPOINTMENTS, PISA_SECRET_KEY
-from pisa.responder import Responder
-from pisa.block_processor import BlockProcessor
 from pisa.utils.zmq_subscriber import ZMQHandler
 
 logger = Logger("Watcher")
 
 
 class Watcher:
-    def __init__(self, max_appointments=MAX_APPOINTMENTS):
+    def __init__(self, block_processor, responder,
+                 expiry_delta, max_appointments, signing_key_file,
+                 feed_protocol, feed_addr, feed_port):
         self.appointments = dict()
         self.locator_uuid_map = dict()
         self.block_queue = None
         self.asleep = True
+        self.block_processor = block_processor
+        self.responder = responder
+        self.expiry_delta = expiry_delta
         self.max_appointments = max_appointments
+        self.feed_protocol = feed_protocol
+        self.feed_addr = feed_addr
+        self.feed_port = feed_port
         self.zmq_subscriber = None
-        self.responder = Responder()
 
-        if PISA_SECRET_KEY is None:
+        if signing_key_file is None:
             raise ValueError("No signing key provided. Please fix your pisa.conf")
         else:
-            with open(PISA_SECRET_KEY, "r") as key_file:
-                secret_key_pem = key_file.read().encode("utf-8")
-                self.signing_key = load_pem_private_key(secret_key_pem, password=None, backend=default_backend())
+            with open(signing_key_file, "r") as key_file:
+                privkey_pem = key_file.read().encode("utf-8")
+                self.signing_key = load_pem_private_key(privkey_pem, password=None, backend=default_backend())
 
     def add_appointment(self, appointment):
         # Rationale:
@@ -85,7 +89,9 @@ class Watcher:
         return appointment_added, signature
 
     def do_subscribe(self):
-        self.zmq_subscriber = ZMQHandler(parent="Watcher")
+        self.zmq_subscriber = ZMQHandler(parent="Watcher",
+                                         feed_protocol=self.feed_protocol, feed_addr=self.feed_addr,
+                                         feed_port=self.feed_port)
         self.zmq_subscriber.handle(self.block_queue)
 
     def do_watch(self):
@@ -93,7 +99,7 @@ class Watcher:
             block_hash = self.block_queue.get()
             logger.info("New block received", block_hash=block_hash)
 
-            block = BlockProcessor.get_block(block_hash)
+            block = self.block_processor.get_block(block_hash)
 
             if block is not None:
                 txids = block.get('tx')
@@ -101,12 +107,12 @@ class Watcher:
                 logger.info("List of transactions.", txids=txids)
 
                 expired_appointments = [uuid for uuid, appointment in self.appointments.items()
-                                        if block["height"] > appointment.end_time + EXPIRY_DELTA]
+                                        if block["height"] > appointment.end_time + self.expiry_delta]
 
                 Cleaner.delete_expired_appointment(expired_appointments, self.appointments, self.locator_uuid_map)
 
-                potential_matches = BlockProcessor.get_potential_matches(txids, self.locator_uuid_map)
-                matches = BlockProcessor.get_matches(potential_matches, self.locator_uuid_map, self.appointments)
+                potential_matches = self.block_processor.get_potential_matches(txids, self.locator_uuid_map)
+                matches = self.block_processor.get_matches(potential_matches, self.locator_uuid_map, self.appointments)
 
                 for locator, uuid, dispute_txid, justice_txid, justice_rawtx in matches:
                     # Errors decrypting the Blob will result in a None justice_txid

@@ -21,6 +21,11 @@ appointments = []
 locator_dispute_tx_map = {}
 
 
+MAX_APPOINTMENTS = 100
+EXPIRY_DELTA = 6
+SIGNING_KEY_FILE = 'test/signing_key_priv.pem.test'
+
+
 def generate_dummy_appointment():
     r = requests.get(url=PISA_API + '/get_block_count', timeout=5)
 

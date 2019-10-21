@@ -4,7 +4,7 @@ from signal import signal, SIGINT, SIGQUIT, SIGTERM
 
 from pisa.logger import Logger
 from pisa.api import start_api
-from pisa.conf import BTC_NETWORK
+from pisa.conf import BTC_NETWORK, BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT
 from pisa.tools import can_connect_to_bitcoind, in_correct_network
 
 logger = Logger("Daemon")
@@ -30,7 +30,7 @@ if __name__ == '__main__':
         pass
 
     try:
-        if can_connect_to_bitcoind():
+        if can_connect_to_bitcoind(BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT):
             if in_correct_network(BTC_NETWORK):
                 # Fire the api
                 start_api()
