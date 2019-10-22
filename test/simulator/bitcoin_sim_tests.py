@@ -7,7 +7,7 @@ from threading import Thread
 from test.simulator.transaction import TX
 from test.simulator.bitcoind_sim import run_simulator
 from pisa.utils.auth_proxy import AuthServiceProxy, JSONRPCException
-from pisa.conf import BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT
+import pisa.conf as conf
 
 MIXED_VALUES = values = [-1, 500, '', '111', [], 1.1, None, '', "a" * 31, "b" * 33, os.urandom(32).hex()]
 
@@ -24,7 +24,7 @@ def run_bitcoind():
 
 @pytest.fixture(scope="module")
 def genesis_block_hash(run_bitcoind):
-    return bitcoin_cli.getblockhash(0)
+    return bitcoin_cli(conf).getblockhash(0)
 
 
 def check_hash_format(txid):
@@ -37,7 +37,7 @@ bitcoin_cli = AuthServiceProxy("http://%s:%s@%s:%d" % (BTC_RPC_USER, BTC_RPC_PAS
 
 def test_help(run_bitcoind):
     # Help should always return 0
-    assert(bitcoin_cli.help() == 0)
+    assert(bitcoin_cli(conf).help() == 0)
 
 
 # FIXME: Better assert for the exceptions would be nice (check the returned errno is the expected one)
@@ -49,7 +49,7 @@ def test_getblockhash(genesis_block_hash):
     # Check that the values are within range and of the proper format (all should fail)
     for v in MIXED_VALUES:
         try:
-            bitcoin_cli.getblockhash(v)
+            bitcoin_cli(conf).getblockhash(v)
             assert False
         except JSONRPCException as e:
             assert True
@@ -57,7 +57,7 @@ def test_getblockhash(genesis_block_hash):
 
 def test_get_block(genesis_block_hash):
     # getblock should return a list of transactions and the height
-    block = bitcoin_cli.getblock(genesis_block_hash)
+    block = bitcoin_cli(conf).getblock(genesis_block_hash)
     assert(isinstance(block.get('tx'), list))
     assert(len(block.get('tx')) != 0)
     assert(isinstance(block.get('height'), int))
@@ -65,7 +65,7 @@ def test_get_block(genesis_block_hash):
     # It should fail for wrong data formats and random ids
     for v in MIXED_VALUES:
         try:
-            bitcoin_cli.getblock(v)
+            bitcoin_cli(conf).getblock(v)
             assert False
         except JSONRPCException as e:
             assert True
@@ -73,11 +73,11 @@ def test_get_block(genesis_block_hash):
 
 def test_decoderawtransaction(genesis_block_hash):
     # decoderawtransaction should only return if the given transaction matches a txid format
-    block = bitcoin_cli.getblock(genesis_block_hash)
+    block = bitcoin_cli(conf).getblock(genesis_block_hash)
     coinbase_txid = block.get('tx')[0]
 
-    coinbase_tx = bitcoin_cli.getrawtransaction(coinbase_txid).get("hex")
-    tx = bitcoin_cli.decoderawtransaction(coinbase_tx)
+    coinbase_tx = bitcoin_cli(conf).getrawtransaction(coinbase_txid).get("hex")
+    tx = bitcoin_cli(conf).decoderawtransaction(coinbase_tx)
 
     assert(isinstance(tx, dict))
     assert(isinstance(tx.get('txid'), str))
@@ -85,7 +85,7 @@ def test_decoderawtransaction(genesis_block_hash):
 
     # Therefore should also work for a random transaction hex in our simulation
     random_tx = TX.create_dummy_transaction()
-    tx = bitcoin_cli.decoderawtransaction(random_tx)
+    tx = bitcoin_cli(conf).decoderawtransaction(random_tx)
     assert(isinstance(tx, dict))
     assert(isinstance(tx.get('txid'), str))
     assert(check_hash_format(tx.get('txid')))
@@ -93,7 +93,7 @@ def test_decoderawtransaction(genesis_block_hash):
     # But it should fail for not proper formatted one
     for v in MIXED_VALUES:
         try:
-            bitcoin_cli.decoderawtransaction(v)
+            bitcoin_cli(conf).decoderawtransaction(v)
             assert False
         except JSONRPCException as e:
             assert True
@@ -101,12 +101,12 @@ def test_decoderawtransaction(genesis_block_hash):
 
 def test_sendrawtransaction(genesis_block_hash):
     # sendrawtransaction should only allow txids that the simulator has not mined yet
-    bitcoin_cli.sendrawtransaction(TX.create_dummy_transaction())
+    bitcoin_cli(conf).sendrawtransaction(TX.create_dummy_transaction())
 
     # Any data not matching the txid format or that matches with an already mined transaction should fail
     try:
-        genesis_tx = bitcoin_cli.getblock(genesis_block_hash).get("tx")[0]
-        bitcoin_cli.sendrawtransaction(genesis_tx)
+        genesis_tx = bitcoin_cli(conf).getblock(genesis_block_hash).get("tx")[0]
+        bitcoin_cli(conf).sendrawtransaction(genesis_tx)
         assert False
 
     except JSONRPCException as e:
@@ -114,7 +114,7 @@ def test_sendrawtransaction(genesis_block_hash):
 
     for v in MIXED_VALUES:
         try:
-            bitcoin_cli.sendrawtransaction(v)
+            bitcoin_cli(conf).sendrawtransaction(v)
             assert False
         except JSONRPCException as e:
             assert True
@@ -122,15 +122,15 @@ def test_sendrawtransaction(genesis_block_hash):
 
 def test_getrawtransaction(genesis_block_hash):
     # getrawtransaction should work for existing transactions, and fail for non-existing ones
-    genesis_tx = bitcoin_cli.getblock(genesis_block_hash).get("tx")[0]
-    tx = bitcoin_cli.getrawtransaction(genesis_tx)
+    genesis_tx = bitcoin_cli(conf).getblock(genesis_block_hash).get("tx")[0]
+    tx = bitcoin_cli(conf).getrawtransaction(genesis_tx)
 
     assert(isinstance(tx, dict))
     assert(isinstance(tx.get('confirmations'), int))
 
     for v in MIXED_VALUES:
         try:
-            bitcoin_cli.getrawtransaction(v)
+            bitcoin_cli(conf).getrawtransaction(v)
             assert False
         except JSONRPCException as e:
             assert True
@@ -138,7 +138,7 @@ def test_getrawtransaction(genesis_block_hash):
 
 def test_getblockcount():
     # getblockcount should always return a positive integer
-    bc = bitcoin_cli.getblockcount()
+    bc = bitcoin_cli(conf).getblockcount()
     assert (isinstance(bc, int))
     assert (bc >= 0)
 

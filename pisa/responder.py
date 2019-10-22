@@ -39,7 +39,7 @@ class Job:
 
 
 class Responder:
-    def __init__(self, block_processor, bitcoin_cli, feed_protocol, feed_addr, feed_port):
+    def __init__(self, block_processor, conf):
 
         self.jobs = dict()
         self.tx_job_map = dict()
@@ -48,12 +48,9 @@ class Responder:
         self.block_queue = None
         self.asleep = True
         self.zmq_subscriber = None
-        self.bitcoin_cli = bitcoin_cli
-        self.feed_protocol = feed_protocol
-        self.feed_addr = feed_addr
-        self.feed_port = feed_port
+        self.conf = conf
 
-        self.carrier = Carrier(bitcoin_cli)
+        self.carrier = Carrier(conf)
 
     def add_response(self, uuid, dispute_txid, justice_txid, justice_rawtx, appointment_end, retry=False):
         if self.asleep:
@@ -106,8 +103,8 @@ class Responder:
 
     def do_subscribe(self, block_queue):
         self.zmq_subscriber = ZMQHandler(parent='Responder',
-                                         feed_protocol=self.feed_protocol, feed_addr=self.feed_addr,
-                                         feed_port=self.feed_port)
+                                         feed_protocol=self.conf.FEED_PROTOCOL, feed_addr=self.conf.FEED_ADDR,
+                                         feed_port=self.conf.FEED_PORT)
         self.zmq_subscriber.handle(block_queue)
 
     def do_watch(self):
@@ -196,12 +193,12 @@ class Responder:
         for uuid, job in self.jobs.items():
             # First we check if the dispute transaction is still in the blockchain. If not, the justice can not be
             # there either, so we'll need to call the reorg manager straight away
-            dispute_in_chain, _ = check_tx_in_chain(self.bitcoin_cli,
+            dispute_in_chain, _ = check_tx_in_chain(self.conf,
                                                     job.dispute_txid, logger=logger, tx_label='Dispute tx')
 
             # If the dispute is there, we can check the justice tx
             if dispute_in_chain:
-                justice_in_chain, justice_confirmations = check_tx_in_chain(self.bitcoin_cli, job.justice_txid,
+                justice_in_chain, justice_confirmations = check_tx_in_chain(self.conf, job.justice_txid,
                                                                             logger=logger, tx_label='Justice tx')
 
                 # If both transactions are there, we only need to update the justice tx confirmation count

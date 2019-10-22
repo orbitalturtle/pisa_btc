@@ -6,17 +6,17 @@ from pisa.rpc_errors import RPC_INVALID_ADDRESS_OR_KEY
 from pisa.utils.auth_proxy import AuthServiceProxy, JSONRPCException
 
 
-def get_bitcoin_cli(rpc_user, rpc_passwd, rpc_host, rpc_port):
-    return AuthServiceProxy("http://%s:%s@%s:%d" % (rpc_user, rpc_passwd, rpc_host, rpc_port))
+def bitcoin_cli(conf):
+    return AuthServiceProxy("http://%s:%s@%s:%d" % (conf.RPC_USER, conf.RPC_PASSWD, conf.RPC_HOST, conf.RPC_PORT))
 
 
 # TODO: currently only used in the Responder; might move there or in the BlockProcessor
-def check_tx_in_chain(bitcoin_cli, tx_id, logger=Logger(), tx_label='Transaction'):
+def check_tx_in_chain(conf, tx_id, logger=Logger(), tx_label='Transaction'):
     tx_in_chain = False
     confirmations = 0
 
     try:
-        tx_info = bitcoin_cli.getrawtransaction(tx_id, 1)
+        tx_info = bitcoin_cli(conf).getrawtransaction(tx_id, 1)
 
         if tx_info.get("confirmations"):
             confirmations = int(tx_info.get("confirmations"))
@@ -37,23 +37,23 @@ def check_tx_in_chain(bitcoin_cli, tx_id, logger=Logger(), tx_label='Transaction
     return tx_in_chain, confirmations
 
 
-def can_connect_to_bitcoind(rpc_user, rpc_passwd, rpc_host, rpc_port):
+def can_connect_to_bitcoind(conf):
     can_connect = True
 
     try:
-        get_bitcoin_cli(rpc_user, rpc_passwd, rpc_host, rpc_port).help()
+        bitcoin_cli(conf).help()
     except (ConnectionRefusedError, JSONRPCException, HTTPException):
         can_connect = False
 
     return can_connect
 
 
-def in_correct_network(bitcoin_cli, network):
+def in_correct_network(conf, network):
     mainnet_genesis_block_hash = "000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f"
     testnet3_genesis_block_hash = "000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943"
     correct_network = False
 
-    genesis_block_hash = bitcoin_cli.getblockhash(0)
+    genesis_block_hash = self.bitcoin_cli(conf).getblockhash(0)
 
     if network == 'mainnet' and genesis_block_hash == mainnet_genesis_block_hash:
         correct_network = True

@@ -10,7 +10,7 @@ from test.simulator.utils import sha256d
 from test.simulator.transaction import TX
 from test.unit.conftest import generate_block
 from pisa.utils.auth_proxy import AuthServiceProxy
-from pisa.conf import BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT, MAX_APPOINTMENTS
+import pisa.conf as conf
 
 logging.getLogger().disabled = True
 
@@ -145,7 +145,8 @@ def test_get_all_appointments_watcher():
 
 def test_get_all_appointments_responder():
     # Trigger all disputes
-    bitcoin_cli = AuthServiceProxy("http://%s:%s@%s:%d" % (BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT))
+    bitcoin_cli = AuthServiceProxy("http://%s:%s@%s:%d" %
+                                   (conf.BTC_RPC_USER, conf.BTC_RPC_PASSWD, conf.BTC_RPC_HOST, conf.BTC_RPC_PORT))
 
     locators = [appointment["locator"] for appointment in appointments]
     for locator, dispute_tx in locator_dispute_tx_map.items():

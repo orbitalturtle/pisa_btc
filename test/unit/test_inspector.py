@@ -4,22 +4,12 @@ from pisa import logging
 from pisa.errors import *
 from pisa.inspector import Inspector
 from pisa.appointment import Appointment
-from pisa.tools import get_bitcoin_cli
 from pisa.block_processor import BlockProcessor
-from pisa.conf import BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT
-from pisa.conf import MIN_DISPUTE_DELTA, SUPPORTED_CIPHERS, SUPPORTED_HASH_FUNCTIONS
+import pisa.conf as conf
 
-MIN_DISPUTE_DELTA = 20
-SUPPORTED_CIPHERS = ["AES-GCM-128"]
-SUPPORTED_HASH_FUNCTIONS = ["SHA256"]
 
-bitcoin_cli = get_bitcoin_cli(BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT)
-block_processor = BlockProcessor(bitcoin_cli)
-inspector = Inspector(
-    min_dispute_delta=MIN_DISPUTE_DELTA,
-    supported_ciphers=SUPPORTED_CIPHERS,
-    supported_hash_functions=SUPPORTED_HASH_FUNCTIONS
-)
+block_processor = BlockProcessor(conf)
+inspector = Inspector(conf=conf)
 
 APPOINTMENT_OK = (0, None)
 
@@ -114,12 +104,12 @@ def test_check_end_time():
 
 def test_check_delta():
     # Right value, right format
-    deltas = [MIN_DISPUTE_DELTA, MIN_DISPUTE_DELTA+1, MIN_DISPUTE_DELTA+1000]
+    deltas = [conf.MIN_DISPUTE_DELTA, conf.MIN_DISPUTE_DELTA+1, conf.MIN_DISPUTE_DELTA+1000]
     for delta in deltas:
         assert (inspector.check_delta(delta) == APPOINTMENT_OK)
 
     # Delta too small
-    deltas = [MIN_DISPUTE_DELTA-1, MIN_DISPUTE_DELTA-2, 0, -1, -1000]
+    deltas = [conf.MIN_DISPUTE_DELTA-1, conf.MIN_DISPUTE_DELTA-2, 0, -1, -1000]
     for delta in deltas:
         assert (inspector.check_delta(delta)[0] == APPOINTMENT_FIELD_TOO_SMALL)
 
@@ -159,7 +149,7 @@ def test_check_blob():
 
 def test_check_cipher():
     # Right format and content (any case combination should be accepted)
-    for cipher in SUPPORTED_CIPHERS:
+    for cipher in conf.SUPPORTED_CIPHERS:
         cipher_cases = [cipher, cipher.lower(), cipher.capitalize()]
         for case in cipher_cases:
             assert(inspector.check_cipher(case) == APPOINTMENT_OK)
@@ -181,7 +171,7 @@ def test_check_cipher():
 
 def test_check_hash_function():
     # Right format and content (any case combination should be accepted)
-    for hash_function in SUPPORTED_HASH_FUNCTIONS:
+    for hash_function in conf.SUPPORTED_HASH_FUNCTIONS:
         hash_function_cases = [hash_function, hash_function.lower(), hash_function.capitalize()]
         for case in hash_function_cases:
             assert (inspector.check_hash_function(case) == APPOINTMENT_OK)
@@ -214,10 +204,10 @@ def test_inspect(run_bitcoind):
     locator = urandom(32).hex()
     start_time = BlockProcessor.get_block_count() + 5
     end_time = start_time + 20
-    dispute_delta = MIN_DISPUTE_DELTA
+    dispute_delta = conf.MIN_DISPUTE_DELTA
     encrypted_blob = urandom(64).hex()
-    cipher = SUPPORTED_CIPHERS[0]
-    hash_function = SUPPORTED_HASH_FUNCTIONS[0]
+    cipher = conf.SUPPORTED_CIPHERS[0]
+    hash_function = conf.SUPPORTED_HASH_FUNCTIONS[0]
 
     appointment_data = {"locator": locator, "start_time": start_time, "end_time": end_time,
                         "dispute_delta": dispute_delta, "encrypted_blob": encrypted_blob, "cipher": cipher,

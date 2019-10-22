@@ -22,12 +22,11 @@ from test.simulator.utils import sha256d
 from test.simulator.transaction import TX
 from test.unit.conftest import generate_block
 from pisa.utils.auth_proxy import AuthServiceProxy
-from pisa.tools import get_bitcoin_cli
+from pisa.tools import bitcoin_cli
 
 # TODO: should use mocked settings and objects instead of importing from pisa.conf
-from pisa.conf import BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT
-from pisa.conf import MAX_APPOINTMENTS, EXPIRY_DELTA, PISA_SECRET_KEY
-from pisa.conf import FEED_PROTOCOL, FEED_ADDR, FEED_PORT
+import pisa.conf as conf
+
 
 logging.getLogger().disabled = True
 
@@ -35,7 +34,7 @@ APPOINTMENTS = 5
 START_TIME_OFFSET = 1
 END_TIME_OFFSET = 1
 
-with open(PISA_SECRET_KEY, "r") as key_file:
+with open(conf.PISA_SECRET_KEY, "r") as key_file:
     pubkey_pem = key_file.read().encode("utf-8")
     # TODO: should use the public key file instead, but it is not currently exported in the configuration
     signing_key = load_pem_private_key(pubkey_pem, password=None, backend=default_backend())
@@ -44,24 +43,15 @@ with open(PISA_SECRET_KEY, "r") as key_file:
 
 @pytest.fixture(scope="module")
 def watcher():
-    bitcoin_cli = get_bitcoin_cli(BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT)
-    block_processor = BlockProcessor(bitcoin_cli)
-    responder = Responder(block_processor=block_processor, bitcoin_cli=bitcoin_cli)
+    block_processor = BlockProcessor(conf=conf)
+    responder = Responder(conf=conf, block_processor=block_processor)
 
-    return Watcher(
-        block_processor=block_processor,
-        responder=responder,
-        expiry_delta=EXPIRY_DELTA,
-        max_appointments=MAX_APPOINTMENTS,
-        signing_key_file=SIGNING_KEY_FILE,
-        feed_protocol=FEED_PROTOCOL,
-        feed_addr=FEED_ADDR,
-        feed_port=FEED_PORT
-    )
+    return Watcher(block_processor=block_processor, responder=responder, conf=conf)
 
 
 def generate_dummy_appointment():
-    bitcoin_cli = AuthServiceProxy("http://%s:%s@%s:%d" % (BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT))
+    bitcoin_cli = AuthServiceProxy("http://%s:%s@%s:%d" %
+                                   (conf.BTC_RPC_USER, conf.BTC_RPC_PASSWD, conf.BTC_RPC_HOST, conf.BTC_RPC_PORT))
 
     dispute_tx = TX.create_dummy_transaction()
     dispute_txid = sha256d(dispute_tx)
@@ -105,7 +95,7 @@ def test_init(watcher):
     assert type(watcher.locator_uuid_map) is dict and len(watcher.locator_uuid_map) == 0
     assert watcher.block_queue is None
     assert watcher.asleep is True
-    assert watcher.max_appointments == MAX_APPOINTMENTS
+    assert watcher.max_appointments == conf.MAX_APPOINTMENTS
     assert watcher.zmq_subscriber is None
     assert type(watcher.responder) is Responder
 
@@ -134,7 +124,7 @@ def test_add_too_many_appointments(watcher):
     # Any appointment on top of those should fail
     watcher.appointments = dict()
 
-    for _ in range(MAX_APPOINTMENTS):
+    for _ in range(conf.MAX_APPOINTMENTS):
         appointment, dispute_tx = generate_dummy_appointment()
         added_appointment, sig = watcher.add_appointment(appointment)
 
@@ -163,7 +153,8 @@ def test_do_subscribe(watcher):
 
 
 def test_do_watch(watcher):
-    bitcoin_cli = AuthServiceProxy("http://%s:%s@%s:%d" % (BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT))
+    bitcoin_cli = AuthServiceProxy("http://%s:%s@%s:%d" %
+                                   (conf.BTC_RPC_USER, conf.BTC_RPC_PASSWD, conf.BTC_RPC_HOST, conf.BTC_RPC_PORT))
 
     # We will wipe all the previous data and add 5 appointments
     watcher.appointments, watcher.locator_uuid_map, dispute_txs = create_appointments(APPOINTMENTS)
@@ -186,7 +177,7 @@ def test_do_watch(watcher):
     # The rest of appointments will timeout after the end (2) + EXPIRY_DELTA
     # Wait for an additional block to be safe
 
-    for _ in range(EXPIRY_DELTA + START_TIME_OFFSET + END_TIME_OFFSET):
+    for _ in range(conf.EXPIRY_DELTA + START_TIME_OFFSET + END_TIME_OFFSET):
         generate_block()
 
     assert len(watcher.appointments) == 0

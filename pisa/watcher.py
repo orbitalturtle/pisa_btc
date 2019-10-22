@@ -15,20 +15,14 @@ logger = Logger("Watcher")
 
 
 class Watcher:
-    def __init__(self, block_processor, responder,
-                 expiry_delta, max_appointments, signing_key_file,
-                 feed_protocol, feed_addr, feed_port):
+    def __init__(self, block_processor, responder, conf):
         self.appointments = dict()
         self.locator_uuid_map = dict()
         self.block_queue = None
         self.asleep = True
         self.block_processor = block_processor
         self.responder = responder
-        self.expiry_delta = expiry_delta
-        self.max_appointments = max_appointments
-        self.feed_protocol = feed_protocol
-        self.feed_addr = feed_addr
-        self.feed_port = feed_port
+        self.conf = conf
         self.zmq_subscriber = None
 
         if signing_key_file is None:
@@ -90,8 +84,8 @@ class Watcher:
 
     def do_subscribe(self):
         self.zmq_subscriber = ZMQHandler(parent="Watcher",
-                                         feed_protocol=self.feed_protocol, feed_addr=self.feed_addr,
-                                         feed_port=self.feed_port)
+                                         feed_protocol=self.conf.feed_protocol, feed_addr=self.conf.feed_addr,
+                                         feed_port=self.conf.feed_port)
         self.zmq_subscriber.handle(self.block_queue)
 
     def do_watch(self):
@@ -107,7 +101,7 @@ class Watcher:
                 logger.info("List of transactions.", txids=txids)
 
                 expired_appointments = [uuid for uuid, appointment in self.appointments.items()
-                                        if block["height"] > appointment.end_time + self.expiry_delta]
+                                        if block["height"] > appointment.end_time + self.conf.expiry_delta]
 
                 Cleaner.delete_expired_appointment(expired_appointments, self.appointments, self.locator_uuid_map)
 

@@ -3,18 +3,19 @@ from hashlib import sha256
 
 from pisa.logger import Logger
 from pisa.utils.auth_proxy import JSONRPCException
+from pisa.tools import bitcoin_cli
 
 logger = Logger("BlockProcessor")
 
 
 class BlockProcessor:
-    def __init__(self, bitcoin_cli):
-        self.bitcoin_cli = bitcoin_cli
+    def __init__(self, conf):
+        self.conf = conf
 
     def get_block(self, block_hash):
 
         try:
-            block = self.bitcoin_cli.getblock(block_hash)
+            block = bitcoin_cli(self.conf).getblock(block_hash)
 
         except JSONRPCException as e:
             block = None
@@ -24,7 +25,7 @@ class BlockProcessor:
 
     def get_best_block_hash(self,):
         try:
-            block_hash = self.bitcoin_cli.getbestblockhash()
+            block_hash = bitcoin_cli(self.conf).getbestblockhash()
 
         except JSONRPCException as e:
             block_hash = None
@@ -34,7 +35,7 @@ class BlockProcessor:
 
     def get_block_count(self):
         try:
-            block_count = self.bitcoin_cli.getblockcount()
+            block_count = bitcoin_cli(self.conf).getblockcount()
 
         except JSONRPCException as e:
             block_count = None
@@ -68,7 +69,7 @@ class BlockProcessor:
                 try:
                     # ToDo: #20-test-tx-decrypting-edge-cases
                     justice_rawtx = appointments[uuid].encrypted_blob.decrypt(dispute_txid)
-                    justice_txid = self.bitcoin_cli.decoderawtransaction(justice_rawtx).get('txid')
+                    justice_txid = bitcoin_cli(self.conf).decoderawtransaction(justice_rawtx).get('txid')
                     logger.info("Match found for locator.", locator=locator, uuid=uuid, justice_txid=justice_txid)
 
                 except JSONRPCException as e:

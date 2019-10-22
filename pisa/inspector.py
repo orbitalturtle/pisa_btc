@@ -13,11 +13,9 @@ logger = Logger("Inspector")
 
 
 class Inspector:
-    def __init__(self, block_processor, min_dispute_delta, supported_ciphers, supported_hash_functions):
+    def __init__(self, block_processor, conf):
         self.block_processor = block_processor
-        self.min_dispute_delta = min_dispute_delta
-        self.supported_ciphers = supported_ciphers
-        self.supported_hash_functions = supported_hash_functions
+        self.conf = conf
 
     def inspect(self, data):
         locator = data.get('locator')
@@ -152,10 +150,10 @@ class Inspector:
         elif t != int:
             rcode = errors.APPOINTMENT_WRONG_FIELD_TYPE
             message = "wrong dispute_delta data type ({})".format(t)
-        elif dispute_delta < self.min_dispute_delta:
+        elif dispute_delta < self.conf.MIN_DISPUTE_DELTA:
             rcode = errors.APPOINTMENT_FIELD_TOO_SMALL
             message = "dispute delta too small. The dispute delta should be at least {} (current: {})".format(
-                self.min_dispute_delta, dispute_delta)
+                self.conf.MIN_DISPUTE_DELTA, dispute_delta)
 
         if message is not None:
             logger.error(message)
@@ -196,7 +194,7 @@ class Inspector:
         elif t != str:
             rcode = errors.APPOINTMENT_WRONG_FIELD_TYPE
             message = "wrong cipher data type ({})".format(t)
-        elif cipher.upper() not in self.supported_ciphers:
+        elif cipher.upper() not in self.conf.SUPPORTED_CIPHERS:
             rcode = errors.APPOINTMENT_CIPHER_NOT_SUPPORTED
             message = "cipher not supported: {}".format(cipher)
 
@@ -217,7 +215,7 @@ class Inspector:
         elif t != str:
             rcode = errors.APPOINTMENT_WRONG_FIELD_TYPE
             message = "wrong hash_function data type ({})".format(t)
-        elif hash_function.upper() not in self.supported_hash_functions:
+        elif hash_function.upper() not in self.conf.SUPPORTED_HASH_FUNCTIONSS:
             rcode = errors.APPOINTMENT_HASH_FUNCTION_NOT_SUPPORTED
             message = "hash_function not supported {}".format(hash_function)
 

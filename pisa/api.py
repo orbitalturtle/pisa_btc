@@ -4,17 +4,15 @@ from flask import Flask, request, abort, jsonify
 from binascii import hexlify
 
 from pisa import HOST, PORT, logging
-from pisa.conf import MIN_DISPUTE_DELTA, SUPPORTED_CIPHERS, SUPPORTED_HASH_FUNCTIONS
-from pisa.conf import EXPIRY_DELTA, MAX_APPOINTMENTS, SIGNING_KEY_FILE
-from pisa.conf import FEED_PROTOCOL, FEED_ADDR, FEED_PORT
-from pisa.conf import BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT
+
+import pisa.conf as conf
+
 from pisa.logger import Logger
 from pisa.watcher import Watcher
 from pisa.responder import Responder
 from pisa.inspector import Inspector
 from pisa.appointment import Appointment
 from pisa.block_processor import BlockProcessor
-from pisa.tools import get_bitcoin_cli
 
 # ToDo: #5-add-async-to-api
 app = Flask(__name__)
@@ -25,12 +23,8 @@ HTTP_SERVICE_UNAVAILABLE = 503
 
 logger = Logger("API")
 
-bitcoin_cli = get_bitcoin_cli(BTC_RPC_USER, BTC_RPC_PASSWD, BTC_RPC_HOST, BTC_RPC_PORT)
-block_processor = BlockProcessor(bitcoin_cli)
-responder = Responder(
-    block_processor=block_processor, bitcoin_cli=bitcoin_cli,
-    feed_protocol=FEED_PROTOCOL, feed_addr=FEED_ADDR, feed_port=FEED_PORT
-)
+block_processor = BlockProcessor(conf=conf)
+responder = Responder(block_processor=block_processor, conf=conf)
 
 
 @app.route('/', methods=['POST'])
@@ -145,22 +139,8 @@ def start_api():
     global watcher, inspector
 
     # ToDo: #18-separate-api-from-watcher
-    watcher = Watcher(
-        block_processor=block_processor,
-        responder=responder,
-        expiry_delta=EXPIRY_DELTA,
-        max_appointments=MAX_APPOINTMENTS,
-        signing_key_file=SIGNING_KEY_FILE,
-        feed_protocol=FEED_PROTOCOL,
-        feed_addr=FEED_ADDR,
-        feed_port=FEED_PORT
-    )
-    inspector = Inspector(
-        block_processor=block_processor,
-        min_dispute_delta=MIN_DISPUTE_DELTA,
-        supported_ciphers=SUPPORTED_CIPHERS,
-        supported_hash_functions=SUPPORTED_HASH_FUNCTIONS
-    )
+    watcher = Watcher(block_processor=block_processor, responder=responder, conf=conf)
+    inspector = Inspector(block_processor=block_processor, conf=conf)
 
     # Setting Flask log to ERROR only so it does not mess with out logging. Also disabling flask initial messages
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
