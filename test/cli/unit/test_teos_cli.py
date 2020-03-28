@@ -3,7 +3,7 @@ import json
 import shutil
 import responses
 from coincurve import PrivateKey
-from requests.exceptions import ConnectionError
+from requests.exceptions import ConnectionError, Timeout
 
 import common.cryptographer
 from common.logger import Logger
@@ -240,3 +240,37 @@ def test_get_appointment_err():
     responses.add(responses.GET, request_url, body=ConnectionError())
 
     assert not teos_cli.get_appointment(locator, get_appointment_endpoint)
+
+
+@responses.activate
+def test_get_all_appointments():
+    # Response of get_appointment endpoint is an appointment with status added to it.
+    dummy_appointment_full["status"] = "being_watched"
+    response = dummy_appointment_full
+    get_all_appointments_endpoint = teos_endpoint + "get_all_appointments"
+
+    request_url = get_all_appointments_endpoint
+    responses.add(responses.GET, request_url, json=response, status=200)
+    result = teos_cli.get_all_appointments(get_all_appointments_endpoint)
+
+    assert len(responses.calls) == 1
+    assert responses.calls[0].request.url == request_url
+    assert result.get("locator") == response.get("locator")
+
+
+@responses.activate
+def test_get_all_appointments_err():
+    locator = get_random_value_hex(16)
+    get_all_appointments_endpoint = teos_endpoint + "get_all_appointments"
+
+    # Test that get_all_appointments handles a connection error appropriately.
+    request_url = get_all_appointments_endpoint
+    responses.add(responses.GET, request_url, body=ConnectionError())
+
+    assert not teos_cli.get_all_appointments(get_all_appointments_endpoint)
+
+    # Test that get_all_appointments handles a timeout error appropriately.
+    request_url = get_all_appointments_endpoint
+    responses.add(responses.GET, request_url, body=Timeout())
+
+    assert not teos_cli.get_all_appointments(get_all_appointments_endpoint)
