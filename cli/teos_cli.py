@@ -11,7 +11,7 @@ from getopt import getopt, GetoptError
 from requests import ConnectTimeout, ConnectionError
 from requests.exceptions import MissingSchema, InvalidSchema, InvalidURL
 
-from cli.help import show_usage, help_add_appointment, help_get_appointment
+from cli.help import show_usage, help_add_appointment, help_get_appointment, help_get_all_appointments
 from cli import DEFAULT_CONF, DATA_DIR, CONF_FILE_NAME, LOG_PREFIX
 
 import common.cryptographer
@@ -351,7 +351,7 @@ def get_appointment(locator, get_appointment_endpoint):
         get_appointment_endpoint (:obj:`str`): the teos endpoint where to get appointments from.
 
     Returns:
-        :obj:`dict` or :obj:`None`: a dictionary containing thew appointment data if the locator is valid and the tower
+        :obj:`dict` or :obj:`None`: a dictionary containing the appointment data if the locator is valid and the tower
         responds. ``None`` otherwise.
     """
 
@@ -377,6 +377,34 @@ def get_appointment(locator, get_appointment_endpoint):
 
     except requests.exceptions.InvalidSchema:
         logger.error("No transport protocol found. Have you missed http(s):// in the server url?")
+
+    except requests.exceptions.Timeout:
+        logger.error("The request timed out")
+
+
+def get_all_appointments(get_all_appointments_endpoint):
+    """ 
+    Gets information about all appointments stored in the tower, if the user requesting the data is an administrator.
+
+    Args:
+        get_all_appointments_endpoint (:obj:`str`): the teos endpoint from which all appointments can be retrieved.
+
+    Returns:
+        :obj:`dict` a dictionary containing the all the appointments stored by the responder and watcher if the tower
+        responds. 
+    """
+
+    try:
+        r = requests.get(url=get_all_appointments_endpoint, timeout=5)
+        return r.json()
+
+    except ConnectTimeout:
+        logger.error("Can't connect to the Eye of Satoshi's API. Connection timeout")
+        return None
+
+    except ConnectionError:
+        logger.error("Can't connect to the Eye of Satoshi's API. Server cannot be reached")
+        return None
 
     except requests.exceptions.Timeout:
         logger.error("The request timed out")
@@ -419,6 +447,12 @@ def main(args, command_line_conf):
                         if appointment_data:
                             print(appointment_data)
 
+                elif command == "get_all_appointments":
+                    get_all_appointments_endpoint = "{}/get_all_appointments".format(teos_url)
+                    appointment_data = get_all_appointments(get_all_appointments_endpoint)
+                    if appointment_data:
+                        print(appointment_data)
+
                 elif command == "help":
                     if args:
                         command = args.pop(0)
@@ -428,6 +462,9 @@ def main(args, command_line_conf):
 
                         elif command == "get_appointment":
                             sys.exit(help_get_appointment())
+
+                        elif command == "get_all_appointments":
+                            sys.exit(help_get_all_appointments())
 
                         else:
                             logger.error("Unknown command. Use help to check the list of available commands")
@@ -447,7 +484,7 @@ def main(args, command_line_conf):
 
 if __name__ == "__main__":
     command_line_conf = {}
-    commands = ["add_appointment", "get_appointment", "help"]
+    commands = ["add_appointment", "get_appointment", "get_all_appointments", "help"]
 
     try:
         opts, args = getopt(argv[1:], "s:p:h", ["server", "port", "help"])
